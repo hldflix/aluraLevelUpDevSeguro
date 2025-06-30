@@ -1,5 +1,4 @@
-// import { type Request, type Response } from 'express'
-import { Request, Response } from 'express';
+import { type Request, type Response } from 'express'
 import { Paciente } from './pacienteEntity.js'
 import { AppDataSource } from '../data-source.js'
 import { Endereco } from '../enderecos/enderecoEntity.js'
@@ -8,26 +7,50 @@ import { mapeiaPlano } from '../utils/planoSaudeUtils.js'
 import { Consulta } from '../consultas/consultaEntity.js'
 import { AppError, Status } from '../error/ErrorHandler.js'
 import { encryptPassword } from '../utils/senhaUtils.js'
+import { query, validationResult } from 'express-validator'
 
-export const consultaPorPaciente = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  const { userInput } = req.query;
-  const query = `SELECT * FROM paciente WHERE nome = '${userInput}'`;
-  try {
-    const listaPacientes = await AppDataSource.manager.query(query);
-    if (listaPacientes.length === 0) {
-      res.status(404).json('Paciente não encontrado!');
-    } else {
-      res.status(200).json(listaPacientes);
+export const consultaPorPaciente = [
+  query('userInput')
+    // Etapa 1: SANITIZAR PRIMEIRO
+    // Versão robusta para manter letras (com acentos), números e espaços.
+    .trim()
+    .customSanitizer((value) => {
+      // É uma boa prática verificar se o valor é uma string
+      if (typeof value !== 'string') {
+        return '';
+      }
+      // Remove tudo que não for letra mas aceita acentuacao
+      return value.replace(/[^a-zA-Z-à-úÀ-Ú ]/g, '');
+    })
+
+    // Etapa 2: VALIDAR DEPOIS DA LIMPEZA
+    // Agora verificamos o tamanho do resultado ja sanitizado.
+    .isLength({ min: 2, max: 80 })
+    .withMessage('O termo da pesquisa deve conter entre 2 e 80 caracteres.'),
+
+  async (req: Request, res: Response): Promise<void> => {
+    const erros = validationResult(req);
+    if (!erros.isEmpty()) {
+      res.status(400).json({ erros: erros.array() });
+      return;
     }
-  } catch (error) {
-    console.log(error)
-    res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-}
 
+    const { userInput } = req.query
+    console.log('Pesquisando por entrada validada e sanitizada: ', userInput);
+    const query = `SELECT * FROM paciente WHERE nome = ?`;
+    try {
+      const listaPacientes = await AppDataSource.manager.query(query, [userInput]);
+      if (listaPacientes.length === 0) {
+        res.status(404).json('Paciente não encontrado!');
+      } else {
+        res.status(200).json(listaPacientes);
+      }
+    } catch (error) {
+      console.log(error)
+      res.status(500).json({ message: 'Erro interno do servidor' });
+    }
+  }
+]
 
 export const criarPaciente = async (
   req: Request,
